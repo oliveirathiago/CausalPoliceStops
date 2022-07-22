@@ -1,91 +1,103 @@
 library(tidyverse)
 library(ltm)
 
-load('data/dflong.Rdata')
+load('data/df.legitimacy.RData')
+
+load('data/df.Rdata')
+
+dflong <-
+  dflong %>%
+  left_join(df.legitimacy %>% dplyr::select(panelid, legitimacy), by = 'panelid') %>%
+  mutate(comp = comp1 + comp2 + comp3 + comp4 + comp5)
+
+dflong %>% group_by(area) %>% summarise(m = mean(legitimacy, na.rm = T))
 
 ####################################################
 
 ### Measurement models
 
-## 1) Cynicism about police protection
+## 1) Perceptions of police fairness
 
-irt_und <- grm(dflong[, c('und1', 'und2', 'und3')])#, Hessian = T)#sconstrained = F)#start.val = c(rep(1, 16)))
-irt_und
+irt_pj_scores <- 
+  dflong %>%
+  dplyr::select(pj1:pj4) %>%
+  grm %>%
+  factor.scores.grm(resp.patterns = 
+                      dflong %>%
+                      dplyr::select(pj1:pj4)
+  )
 
-irt_und_scores <- factor.scores.grm(irt_und, resp.patterns = dflong[, c('und1', 'und2', 'und3')])
-dflong$cynicism <- -irt_und_scores$score.dat$z1
+## 2) Perceptions of police effectiveness
 
+irt_eff_scores <- 
+  dflong %>%
+  dplyr::select(eff1:eff6) %>%
+  grm %>%
+  factor.scores.grm(resp.patterns = 
+                      dflong %>%
+                      dplyr::select(eff1:eff6)
+  )
 
-## 2) Perceptions of overpolicing
+## 3) Perceptions of overpolicing
 
-irt_ovp <- grm(dflong[, c('ovp1', 'ovp2')])
-irt_ovp
+irt_ovp_scores <- 
+  dflong %>%
+  dplyr::select(ovp1:ovp2) %>%
+  grm %>%
+  factor.scores.grm(resp.patterns = 
+                      dflong %>%
+                      dplyr::select(ovp1:ovp2)
+  )
 
-irt_ovp_scores <- factor.scores.grm(irt_ovp, resp.patterns = dflong[, c('ovp1', 'ovp2')])
-dflong$overpolicing <- irt_ovp_scores$score.dat$z1
+### Deriving new variables
 
+df <-
+  dflong %>%
+  mutate(fairness = irt_pj_scores$score.dat$z1,
+         effectiveness = -irt_eff_scores$score.dat$z1,
+         overpolicing = irt_ovp_scores$score.dat$z1)
 
-## 3) Perceptions of police fairness
-
-irt_pj <- grm(dflong[, c('pj1', 'pj2', 'pj3', 'pj4')])
-irt_pj
-
-irt_pj_scores <- factor.scores.grm(irt_pj, resp.patterns = dflong[, c('pj1', 'pj2', 'pj3', 'pj4')])
-dflong$fairness <- irt_pj_scores$score.dat$z1
+save(df, file = 'data/export/df_new.Rdata')
 
 ####################################################
 
 ### Assessing trends
 
-dfwide <- dflong %>%
-  reshape(timevar = 'wave',
-          idvar = 'quest',
-          direction = 'wide',
-          sep = '_') %>%
-  dplyr::select(-c('class_2', 'white_2', 'male_2', 'area_2',
-                   'class_3', 'white_3', 'male_3', 'area_3')) %>%
-  rename('class' = 'class_1',
-         'white' = 'white_1',
-         'male' = 'male_1',
-         'area' = 'area_1') %>%
-  mutate(stopall_1 = ifelse(stop_1==T,1,0),
-         stopall_2 = ifelse(stop_2==T,1,0),
-         stopall_3 = ifelse(stop_3==T,1,0)) %>%
+dfwide <-
+  dflong %>%
+  dplyr::select(quest, wave, gun, stop) %>%
+  pivot_wider(id_cols = quest,
+              names_from = wave,
+              values_from = c('stop', 'gun')) %>%
+  mutate(stop_1 = ifelse(stop_1 == T, 1, 0),
+         stop_2 = ifelse(stop_2 == T, 1, 0),
+         stop_3 = ifelse(stop_3 == T, 1, 0)) %>%
   replace_na(list(gun_1 = 0,
                   gun_2 = 0,
                   gun_3 = 0,
-                  stopall_1 = 0,
-                  stopall_2 = 0,
-                  stopall_3 = 0))
+                  stop_1 = 0,
+                  stop_2 = 0,
+                  stop_3 = 0)) %>%
+  mutate(gun.dynamics = case_when(
+    gun_1 == 1 & gun_2 == 1 & gun_3 == 1 ~ '1-1-1',
+    gun_1 == 0 & gun_2 == 1 & gun_3 == 1 ~ '0-1-1',
+    gun_1 == 0 & gun_2 == 0 & gun_3 == 1 ~ '0-0-1',
+    gun_1 == 0 & gun_2 == 0 & gun_3 == 0 ~ '0-0-0',
+    gun_1 == 1 & gun_2 == 0 & gun_3 == 1 ~ '1-0-1',
+    gun_1 == 1 & gun_2 == 1 & gun_3 == 0 ~ '1-1-0',
+    gun_1 == 1 & gun_2 == 0 & gun_3 == 0 ~ '1-0-0',
+    gun_1 == 0 & gun_2 == 1 & gun_3 == 0 ~ '0-1-0'
+  ),
+  stop.dynamics = case_when(
+    stop_1 == 1 & stop_2 == 1 & stop_3 == 1 ~ '1-1-1',
+    stop_1 == 0 & stop_2 == 1 & stop_3 == 1 ~ '0-1-1',
+    stop_1 == 0 & stop_2 == 0 & stop_3 == 1 ~ '0-0-1',
+    stop_1 == 0 & stop_2 == 0 & stop_3 == 0 ~ '0-0-0',
+    stop_1 == 1 & stop_2 == 0 & stop_3 == 1 ~ '1-0-1',
+    stop_1 == 1 & stop_2 == 1 & stop_3 == 0 ~ '1-1-0',
+    stop_1 == 1 & stop_2 == 0 & stop_3 == 0 ~ '1-0-0',
+    stop_1 == 0 & stop_2 == 1 & stop_3 == 0 ~ '0-1-0'
+  ))
 
-dfwide <- dfwide %>%
-  mutate(gun.dynamics = ifelse(dfwide$gun_1 == 1 & dfwide$gun_2 == 1 & dfwide$gun_3 == 1, "1-1-1",
-                               ifelse(dfwide$gun_1 == 0 & dfwide$gun_2 == 1 & dfwide$gun_3 == 1, "0-1-1",
-                                      ifelse(dfwide$gun_1 == 0 & dfwide$gun_2 == 0 & dfwide$gun_3 == 1, "0-0-1",
-                                             ifelse(dfwide$gun_1 == 0 & dfwide$gun_2 == 0 & dfwide$gun_3 == 0, "0-0-0",
-                                                    ifelse(dfwide$gun_1 == 1 & dfwide$gun_2 == 0 & dfwide$gun_3 == 1, "1-0-1",
-                                                           ifelse(dfwide$gun_1 == 1 & dfwide$gun_2 == 1 & dfwide$gun_3 == 0, "1-1-0",
-                                                                  ifelse(dfwide$gun_1 == 1 & dfwide$gun_2 == 0 & dfwide$gun_3 == 0, "1-0-0",
-                                                                         ifelse(dfwide$gun_1 == 0 & dfwide$gun_2 == 1 & dfwide$gun_3 == 0, "0-1-0",
-                                                                                "NA"))))))))) %>%
-  mutate(stop.dynamics = ifelse(dfwide$stopall_1 == 1 & dfwide$stopall_2 == 1 & dfwide$stopall_3 == 1, "1-1-1",
-                                ifelse(dfwide$stopall_1 == 0 & dfwide$stopall_2 == 1 & dfwide$stopall_3 == 1, "0-1-1",
-                                       ifelse(dfwide$stopall_1 == 0 & dfwide$stopall_2 == 0 & dfwide$stopall_3 == 1, "0-0-1",
-                                              ifelse(dfwide$stopall_1 == 0 & dfwide$stopall_2 == 0 & dfwide$stopall_3 == 0, "0-0-0",
-                                                     ifelse(dfwide$stopall_1 == 1 & dfwide$stopall_2 == 0 & dfwide$stopall_3 == 1, "1-0-1",
-                                                            ifelse(dfwide$stopall_1 == 1 & dfwide$stopall_2 == 1 & dfwide$stopall_3 == 0, "1-1-0",
-                                                                   ifelse(dfwide$stopall_1 == 1 & dfwide$stopall_2 == 0 & dfwide$stopall_3 == 0, "1-0-0",
-                                                                          ifelse(dfwide$stopall_1 == 0 & dfwide$stopall_2 == 1 & dfwide$stopall_3 == 0, "0-1-0",
-                                                                                 "NA")))))))))
-
-df <- dfwide %>%
-  reshape(timevar = 'wave',
-          idvar = 'quest',
-          direction = 'long',
-          sep = '_',
-          varying = c(6:83)) %>% 
-  filter(!is.na(panelid)) %>%
-  arrange(wave)
-
-
-save(df, file = 'data/df.Rdata')
+table(dfwide$stop.dynamics)
+table(dfwide$gun.dynamics)
